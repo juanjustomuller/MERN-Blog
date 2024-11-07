@@ -83,7 +83,7 @@ const loginUser = async (req, res, next) => {
 /*============== PERFIL DEL USUARIO =======================*/
 //GET: api/users/:id
 //PROTEJIDA
-const getUser = async (req, res) => {
+const getUser = async (req, res, next) => {
     try {
         const {id} = req.params
         const user = await User.findById(id).select("-password")  //.select("-password") para que no incluya la contraseña cuando pedimos el id
@@ -102,49 +102,58 @@ const getUser = async (req, res) => {
 /*============== CAMBIAR FOTO DE PERFIL DEL USUARIO =======================*/
 //POST: api/users/change-avatar
 //PROTEJIDA
-const changeAvatar = async (req, res) => {
+const changeAvatar = async (req, res, next) => {
     try {
-        if(!req.files.avatar) {
-            return next(new HttpError("Please choose an image", 422))
+        // Verificamos si hay una imagen
+        if (!req.files || !req.files.avatar) {
+            return next(new HttpError("Please choose an image", 422));
         }
 
-        //Find user from database
-        const user = await User.findById(req.user.id)
-        //delete old avart ir exists
-        if(user.avatar) {
+        // Buscamos al usuario en la base de datos
+        const user = await User.findById(req.user.id);
+        if (!user) {
+            return next(new HttpError("User not found", 404));
+        }
+
+        // Si el usuario tiene un avatar anterior, lo eliminamos
+        if (user.avatar) {
             fs.unlink(path.join(__dirname, '..', 'uploads', user.avatar), (err) => {
-                if(err) {
-                    return next(new HttpError(err))
+                if (err) {
+                    return next(new HttpError(err, 500));
                 }
-            })
+            });
         }
 
-        const {avatar} = req.files
-        //check de file size
-        if(avatar.size > 500000) {
-            return next(new HttpError("Profile picture too big. Should be less tha 500kb"), 422)
+        const { avatar } = req.files;
+
+        // Verificamos el tamaño del archivo
+        if (avatar.size > 500000) {
+            return next(new HttpError("Profile picture too big. Should be less than 500kb", 422));
         }
 
-        let fileName;
+        // Generamos un nuevo nombre de archivo único para evitar colisiones
+        const fileName = avatar.name;
+        const splittedFileName = fileName.split('.');
+        const newFileName = splittedFileName[0] + uuid() + '.' + splittedFileName[splittedFileName.length - 1];
 
-        fileName = avatar.name
-        let splittedFileName = fileName.split('.')
-        let newFIleName = splittedFileName[0] + uuid() + '.' + splittedFileName[splittedFileName.length -1]
-        avatar.mv(path.join(__dirname, '..', 'uploads', newFIleName), async (err) => {
-            if(err) {
-                return next(new HttpError(err))
-            }
+        // Movemos el archivo al directorio de uploads
+        await avatar.mv(path.join(__dirname, '..', 'uploads', newFileName));
 
-            const updatedAvatar = await User.findByIdAndUpdate(req.user.id, {avatar: newFIleName}, {new: true})
-            if(!updatedAvatar) {
-                return next(new HttpError("Avatar couldn't be changed", 422))
-            }
-            res.status(200).json(updatedAvatar)
-        })
+        // Actualizamos el avatar del usuario en la base de datos
+        const updatedAvatar = await User.findByIdAndUpdate(req.user.id, { avatar: newFileName }, { new: true });
+        if (!updatedAvatar) {
+            return next(new HttpError("Avatar couldn't be changed", 422));
+        }
+
+        // Respondemos con la información del usuario actualizado
+        return res.status(200).json(updatedAvatar);
+
     } catch (error) {
-        return next(new HttpError(error))
+        // Si ocurre un error, lo manejamos
+        return next(new HttpError(error.message, 500));
     }
 }
+
 
 
 
